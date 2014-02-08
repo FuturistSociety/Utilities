@@ -1,6 +1,6 @@
 /**
  * @author Steven L. Moxley
- * @version 1.0
+ * @version 0.1
  */
 package org.futurist.util.math;
 

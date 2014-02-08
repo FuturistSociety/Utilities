@@ -1,4 +1,4 @@
-package org.futurist.util.data;
+package org.futurist.util.jobs.feeds;
 
 import java.io.File;
 import java.sql.Date;

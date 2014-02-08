@@ -2,17 +2,18 @@
  * @author Steven L. Moxley
  * @version 0.1
  */
-package org.futurist.util.math;
+package org.futurist.util.math.evolve;
 
 import java.util.ArrayList;
 import java.security.SecureRandom;
 import java.util.TreeMap;
 
-import org.apache.commons.math3.distribution.ChiSquaredDistribution;
 import org.futurist.neuralnet.Network;
+import org.futurist.neuralnet.evolve.Evolver;
+import org.futurist.util.math.DataPreparer;
+import org.futurist.util.math.StatisticalReporter;
 
 import weka.classifiers.Classifier;
-import weka.classifiers.Evaluation;
 import weka.classifiers.bayes.BayesNet;
 import weka.classifiers.functions.MultilayerPerceptron;
 import weka.classifiers.meta.Bagging;
@@ -23,11 +24,11 @@ import weka.core.DenseInstance;
 import weka.core.FastVector;
 import weka.core.Instance;
 import weka.core.Instances;
-import weka.core.Utils;
 
-public class MetaClassifier extends Thread {
+public class EvolvingMetaClassifier extends Thread {
 
 	private Double[] yData;
+	private String[] yDataNominal;
 	private Double[][] xData;
 	private String[] parameterNames;
 	private int numObservations;
@@ -38,6 +39,7 @@ public class MetaClassifier extends Thread {
 	private ArrayList<Classifier> algorithms;
 	private TreeMap<Double, String> parameterScores;
 	private TreeMap<Double, String> algorithmScores;
+	private boolean nominal;
 	private boolean trained;
 
 	/**
@@ -47,9 +49,21 @@ public class MetaClassifier extends Thread {
 	 * @param p independent variable (model parameter) names or descriptions.
 	 * @param trainRatio the percentage of the dataset to use as training data in each round.
 	 */
-	public MetaClassifier(Double[] y, Double[][] x, String[] p, Double trainRatio) {
-		// initialize data variables
-		yData = y;
+	public EvolvingMetaClassifier(Object[] y, Double[][] x, String[] p, Double trainRatio) {
+		// initialize correct/ideal/target values observed for the dependent variable
+		if(y instanceof Number[]) {
+			nominal = false;
+			yData = dataToDouble((Number[]) y);
+		} else {
+			nominal = true;
+			yDataNominal = new String[y.length];
+			for(int i = 0; i < y.length; i++) {
+				yDataNominal[i] = y[i].toString();
+				yData[i] = new Double(i);
+			}
+		}
+
+		// initialize other data variables
 		xData = x;
 		parameterNames = p;
 		numObservations = xData.length;
@@ -58,16 +72,16 @@ public class MetaClassifier extends Thread {
 		algorithms = new ArrayList<Classifier>();
 		trained = false;
 
-		//System.out.println("x[" + x.length + "][" + x[0].length + "]");
-		//System.out.println("y[" + y.length + "]");
+		System.out.println("x[" + x.length + "][" + x[0].length + "]");
+		System.out.println("y[" + y.length + "]");
 		System.out.println("# obs: " + numObservations);
 		System.out.println("# params: " + numParameters);
 
 		// pre-process data per parameter and generate statistical reports as we go
-		processedData = new double[numObservations][numParameters];
+		processedData = new double[numObservations][numParameters+1];  // +1 allows class (y-value corresponding to this observation) to be stored
 		for(int j = 0; j < numParameters; j++) {
 			// load current parameter's data
-			//System.out.println("Analyzing statistical properties of parameter " + j);
+			System.out.println("Analyzing statistical properties of parameter " + j);
 			double preProcess[] = new double[numObservations];
 			for(int i = 0; i < numObservations; i++) {
 				preProcess[i] = xData[i][j];
@@ -94,6 +108,7 @@ public class MetaClassifier extends Thread {
 			processedDataReport.saveReportToFile("Paramenter " + parameterNames[j]);
 			for(int i = 0; i < postProcess.length; i++) {
 				processedData[i][j] = postProcess[i];
+				processedData[i][numParameters] = j;
 			}
 
 		}
@@ -122,23 +137,16 @@ public class MetaClassifier extends Thread {
 			// instantiate Weka data sets
 			FastVector<Attribute> wekaAttributes = new FastVector<Attribute>(numParameters);
 			for(String p : parameterNames) { 
-				wekaAttributes.add(new Attribute(p));
+				wekaAttributes.addElement(new Attribute(p));
 			}
-			wekaAttributes.add(new Attribute("Class"));
+			wekaAttributes.addElement(new Attribute("Class"));
 			Instances wekaTrainingInstances = new Instances("Roud " + round + " Training Instances", wekaAttributes, trainingSetSize);
 			Instances wekaTestingInstances = new Instances("Roud " + round + " Testing Instances", wekaAttributes, testingSet.length);
-			Instances wekaTrainingInstancesString = new Instances("Roud " + round + " Training Instances with String Class", wekaAttributes, trainingSetSize);
-			Instances wekaTestingInstancesString = new Instances("Roud " + round + " Testing Instances with String Class", wekaAttributes, testingSet.length);
 
 			// set the class instance that we want to predict
-			FastVector<String> classes = new FastVector<String>(3);
-			classes.add("0");
-			classes.add("1");
-			classes.add("2");
-			Attribute nominalClass = new Attribute("Class", classes);
-			wekaTrainingInstances.setClass(nominalClass);
+			wekaTrainingInstances.setClass(new Attribute("Class"));
 			wekaTrainingInstances.setClassIndex(numParameters);
-			wekaTestingInstances.setClass(nominalClass);
+			wekaTestingInstances.setClass(new Attribute("Class"));
 			wekaTestingInstances.setClassIndex(numParameters);
 
 			// randomly choose observations to copy
@@ -156,10 +164,14 @@ public class MetaClassifier extends Thread {
 				for(int p = 0; p < numParameters; p++) {
 					testingSet[obs][p] = processedData[testIndexes.get(obs)][p];
 				}
-				testingSet[obs][numParameters] = yData[obs].doubleValue();  // store class/target value
+				testingSet[obs][numParameters] = yData[obs];  // store class/target value
 				Instance instance = new DenseInstance(1.0, testingSet[obs]);
 				instance.setDataset(wekaTestingInstances);
-				instance.setClassValue(testingSet[obs][numParameters]);
+				if(nominal) {
+					instance.setClassValue(yDataNominal[obs]);
+				} else {
+					instance.setClassValue(testingSet[obs][numParameters]);
+				}
 				wekaTestingInstances.add(instance);
 			}
 
@@ -171,111 +183,78 @@ public class MetaClassifier extends Thread {
 					for(int p = 0; p < numParameters; p++) {
 						trainingSet[trainingObs][p] = processedData[obs][p];
 					}
-					trainingSet[trainingObs][numParameters] = yData[obs].doubleValue();  // store class/target value
+					trainingSet[trainingObs][numParameters] = yData[obs];  // store class/target value
 					Instance instance = new DenseInstance(1.0, trainingSet[trainingObs]);
 					instance.setDataset(wekaTrainingInstances);
-					instance.setClassValue(trainingSet[trainingObs][numParameters]);
+					if(nominal) {
+						instance.setClassValue(yDataNominal[obs]);
+					} else {
+						instance.setClassValue(trainingSet[trainingObs][numParameters]);
+					}
 					wekaTrainingInstances.add(instance);
 					trainingObs++;
 				}
 			}
 
+			// test Weka meta-classification
 			System.out.println("\nRunning training round " + round + " with " + trainingSet.length + " training observations (" + wekaTrainingInstances.numInstances() + " Weka instances) and " + testingSet.length + " testing observations (" + wekaTestingInstances.numInstances() + " Weka instances). ");
 
-			// test Weka meta-classification with a numeric class
-			// run: Bagging -P 100 -S 1 -num-slots 1 -I 1 -W weka.classifiers.trees.REPTree -- -M 2 -V 0.001 -N 3 -S 1 -L -1 -I 0.0
-			// options: bag 100 percent with 1 seed, 1 execution slot, and 1 iteration using REPTRee with a minimum of 2 instances, minimum variance of 0.001, 3 folds, 1 seed, max depth of -1, and an initial count of 0.0
-			Bagging wekaBagging = new Bagging();
-			try {
-				wekaBagging.setOptions(Utils.splitOptions("-P 100 -S 1 -num-slots 1 -I 1 -W weka.classifiers.trees.REPTree -- -M 2 -V 0.001 -N 3 -S 1 -L -1 -I 0.0"));
-				wekaBagging.buildClassifier(wekaTrainingInstances);
-				Evaluation baggingEval = new Evaluation(wekaTrainingInstances);
-				baggingEval.evaluateModel(wekaBagging, wekaTestingInstances);
-				parameterScores.put(baggingEval.correlationCoefficient(), "Weka Bagging Classification R^2");
-				algorithmScores.put(baggingEval.correlationCoefficient(), "Weka Bagging Classification R^2");
-				System.out.println(baggingEval.toSummaryString("\nResults\n======\n", false));
-			} catch (Exception e) {
-				e.printStackTrace();
-			}
-
-			// run: MultilayerPerceptron -L 0.75 -M 0.2 -N 500 -V 0 -S 0 -E 25 -H a -R -D
-			// options: backpropagate with a learning rate of 0.75, momentum of 0.2, 500 second training time, 0 validation set size, seed of 0, validation threshold of 25, (number of attributes + number of classes) / 2 hidden layers, no reset, and decay enabled
-			MultilayerPerceptron wekaPerceptron = new MultilayerPerceptron();
-			try {
-				wekaPerceptron.setOptions(Utils.splitOptions("-L 0.75 -M 0.2 -N 500 -V 0 -S 0 -E 25 -H a -R -D"));
-				wekaPerceptron.buildClassifier(wekaTrainingInstances);
-				Evaluation perceptronEval = new Evaluation(wekaTrainingInstances);
-				perceptronEval.evaluateModel(wekaPerceptron, wekaTestingInstances);
-				parameterScores.put(perceptronEval.correlationCoefficient(), "Weka Multi-Layer Perceptron Classification R^2");
-				algorithmScores.put(perceptronEval.correlationCoefficient(), "Weka Multi-Layer Perceptron Classification R^2");
-				System.out.println(perceptronEval.toSummaryString("\nResults\n======\n", false));
-				algorithms.add(wekaPerceptron);
-			} catch (Exception e) {
-				e.printStackTrace();
-			}
-
-			/*
-			// test Weka meta-classification with a nominal or string class
-			// run: ClassificationViaRegression -W weka.classifiers.trees.M5P -- -U -M 4.0
-			// options: use un-smoothed with a minimum of 2 instances
-			ClassificationViaRegression wekaRegression = new ClassificationViaRegression();
-			try {
-				wekaRegression.setOptions(Utils.splitOptions("-W weka.classifiers.trees.M5P -- -U -M 4.0"));
-				wekaRegression.buildClassifier(wekaTrainingInstances);
-				Evaluation regressionEval = new Evaluation(wekaTrainingInstancesString);
-				regressionEval.evaluateModel(wekaRegression, wekaTestingInstancesString);
-				parameterScores.put(regressionEval.correlationCoefficient(), "Weka Regression Classification R^2");
-				algorithmScores.put(regressionEval.correlationCoefficient(), "Weka Bagging Classification R^2");
-				System.out.println(regressionEval.toSummaryString("\nResults\n======\n", false));
+			if(nominal) {
+				
+				// evolve the fittest parameters to use in Weka's ClassificationViaRegression, run the Classifier, and save its performance score
+				RegressionEvolver regressionEvolver = new RegressionEvolver(wekaTrainingInstances, wekaTestingInstances, new RegressionMutation());
+				ClassificationViaRegression wekaRegression = regressionEvolver.getFittestClassifier();
+				Double regressionCorrelation = regressionEvolver.getBestFinalChromosome().fitness();		
+				parameterScores.put(regressionCorrelation, "Weka Regression Classification R^2");
+				algorithmScores.put(regressionCorrelation, "Weka Regression Classification R^2");
+				System.out.println(regressionEvolver.getBestFinalChromosome().getClassifierEval().toSummaryString("\nResults\n======\n", false));
 				algorithms.add(wekaRegression);
-			} catch (Exception e) {
-				e.printStackTrace();
-			}
 
-			// run: MultiClassClassifier -M 0 -R 2.0 -S 1 -W weka.classifiers.functions.SGD -F 0 -L 0.01 -R 1.0E-4 -E 500
-			// options: use the "1-against-all" method with a random width factor of 2 and 1 seed using a stochastic gradient descent (SGD) with a hingle loss (SVM) function, learning rate of 0.01, lambda of .00001, and 500 epochs
-			// alternative: -W weka.classifiers.functions.Logistic -- -R 1.0E-8 -M -1
-			// alternative: -W weka.classifiers.functions.SMO -C 1.0 -L 0.001 -P 1.0E-12 -N 0 -M -V -1 -W 1 -K "weka.classifiers.functions.supportVector.RBFKernel -C 250007 -G 0.25"
-			// alternative: -W weka.classifiers.functions.MultilayerPerceptron -L 0.75 -M 0.2 -N 500 -V 0 -S 0 -E 20 -H a -R
-			// alternative: -W weka.classifiers.functions.LibLINEAR -S 0 -C 1.0 -E 0.01 -B 2.5
-			MultiClassClassifier wekaMultiClass = new MultiClassClassifier();
-			try {
-				wekaMultiClass.setOptions(Utils.splitOptions("-W weka.classifiers.functions.SGD -F 0 -L 0.01 -R 1.0E-4 -E 500"));
-				wekaMultiClass.buildClassifier(wekaTrainingInstances);
-				Evaluation multiClassEval = new Evaluation(wekaTrainingInstancesString);
-				multiClassEval.evaluateModel(wekaMultiClass, wekaTestingInstancesString);
-				parameterScores.put(multiClassEval.correlationCoefficient(), "Weka Multi-Class Classification R^2");
-				algorithmScores.put(multiClassEval.correlationCoefficient(), "Weka Multi-Class Classification R^2");
-				System.out.println(multiClassEval.toSummaryString("\nResults\n======\n", false));
+				// evolve the fittest parameters to use in Weka's MultiClassClassifier, run the Classifier, and save its performance score
+				MultiClassEvolver multiClassEvolver = new MultiClassEvolver(wekaTrainingInstances, wekaTestingInstances, new BaggingMutation());
+				MultiClassClassifier wekaMultiClass = multiClassEvolver.getFittestClassifier();
+				Double multiClassCorrelation = multiClassEvolver.getBestFinalChromosome().fitness();
+				parameterScores.put(multiClassCorrelation, "Weka Multi-Class Classification R^2");
+				algorithmScores.put(multiClassCorrelation, "Weka Multi-Class Classification R^2");
+				System.out.println(multiClassEvolver.getBestFinalChromosome().getClassifierEval().toSummaryString("\nResults\n======\n", false));
 				algorithms.add(wekaMultiClass);
-			} catch (Exception e) {
-				e.printStackTrace();
-			}
 
-			// run: BayesNet -D -Q weka.classifiers.bayes.net.search.local.LAGDHillClimber -- -L 3 -G 7 -P 2 -S BAYES -E weka.classifiers.bayes.net.estimate.SimpleEstimator -- -A 0.5
-			// options: use the LAGD Hill Climber search algorithm with 2 parents, 7 good operations, 3 look ahead steps, and the Bayes score type; use the Simple Estimator with an alpha of 0.5
-			BayesNet wekaBayesNet = new BayesNet();
-			try {
-				wekaBayesNet.setOptions(Utils.splitOptions("-D -Q weka.classifiers.bayes.net.search.local.LAGDHillClimber -- -L 3 -G 7 -P 2 -S BAYES -E weka.classifiers.bayes.net.estimate.SimpleEstimator -- -A 0.5"));
-				wekaBayesNet.buildClassifier(wekaTrainingInstances);
-				Evaluation BayesNetEval = new Evaluation(wekaTrainingInstancesString);
-				BayesNetEval.evaluateModel(wekaBayesNet, wekaTestingInstancesString);
-				parameterScores.put(BayesNetEval.correlationCoefficient(), "Weka Bayes Network Classification R^2");
-				algorithmScores.put(BayesNetEval.correlationCoefficient(), "Weka Bayes Network Classification R^2");
-				System.out.println(BayesNetEval.toSummaryString("\nResults\n======\n", false));
+				// evolve the fittest parameters to use in Weka's BayesNet, run the Classifier, and save its performance score
+				BayesNetEvolver bayesNetEvolver = new BayesNetEvolver(wekaTrainingInstances, wekaTestingInstances, new MultilayerPerceptronMutation());
+				BayesNet wekaBayesNet = bayesNetEvolver.getFittestClassifier();
+				Double bayesNetCorrelation = bayesNetEvolver.getBestFinalChromosome().fitness();
+				parameterScores.put(bayesNetCorrelation, "Weka Bayes Network Classification R^2");
+				algorithmScores.put(bayesNetCorrelation, "Weka Bayes Network Classification R^2");
+				System.out.println(bayesNetEvolver.getBestFinalChromosome().getClassifierEval().toSummaryString("\nResults\n======\n", false));
 				algorithms.add(wekaBayesNet);
-			} catch (Exception e) {
-				e.printStackTrace();
+				
+			} else {
+
+				// evolve fittest parameters to use in Weka's Bagging, run the Classifier, and save its performance score
+				BaggingEvolver baggingEvolver = new BaggingEvolver(wekaTrainingInstances, wekaTestingInstances, new BaggingMutation());
+				Bagging wekaBagging = baggingEvolver.getFittestClassifier();
+				Double baggingCorrelation = baggingEvolver.getBestFinalChromosome().fitness();
+				parameterScores.put(baggingCorrelation, "Weka Bagging Classification R^2");
+				algorithmScores.put(baggingCorrelation, "Weka Bagging Classification R^2");
+				System.out.println(baggingEvolver.getBestFinalChromosome().getClassifierEval().toSummaryString("\nResults\n======\n", false));
+				algorithms.add(wekaBagging);
+
+				// evolve the fittest parameters to use in Weka's MultilayerPerceptron, run the Classifier, and save its performance score
+				MultilayerPerceptronEvolver multilayerPerceptronEvolver = new MultilayerPerceptronEvolver(wekaTrainingInstances, wekaTestingInstances, new MultilayerPerceptronMutation());
+				MultilayerPerceptron wekaPerceptron = multilayerPerceptronEvolver.getFittestClassifier();
+				Double perceptronCorrelation = multilayerPerceptronEvolver.getBestFinalChromosome().fitness();
+				parameterScores.put(perceptronCorrelation, "Weka Multi-Layer Perceptron Classification R^2");
+				algorithmScores.put(perceptronCorrelation, "Weka Multi-Layer Perceptron Classification R^2");
+				System.out.println(multilayerPerceptronEvolver.getBestFinalChromosome().getClassifierEval().toSummaryString("\nResults\n======\n", false));
+				algorithms.add(wekaPerceptron);
+
+				// evolve the fittest parameters to use in the Futurist Society's neural network, run the neural network, and save its performance score 
+				Evolver neuroEvolver = new Evolver(yData);
+				Network fittestNetwork = neuroEvolver.getFittestNetwork();
+				parameterScores.put(1-fittestNetwork.getAverageError(), "Futurist Society Neural Network Classification R^2");
+				algorithmScores.put(1-fittestNetwork.getAverageError(), "Futurist Society Neural Network Classification R^2");
+				
 			}
-			*/
-			
-			
-			// test Futurist Society neural network (requires jfxrt.jar library from JDK)
-			Network neuralnet = new Network(0, new ChiSquaredDistribution(xData.length*yData.length), xData.length, (xData.length*yData.length) / 2, yData.length, 2 * xData.length, 3, 0.025, 1.25, yData, 100, 100, 100);
-			neuralnet.run();
-			parameterScores.put(1-neuralnet.getAverageError(), "Futurist Society Neural Network Classification R^2");
-			algorithmScores.put(1-neuralnet.getAverageError(), "Futurist Society Neural Network Classification R^2");
-			
 		}
 
 		trained = true;
@@ -353,8 +332,8 @@ public class MetaClassifier extends Thread {
 			if(numParameters == data[0].length) {
 				// instantiate Weka data sets
 				FastVector<Attribute> wekaAttributes = new FastVector<Attribute>(numParameters);
-				for(String p : parameterNames) { wekaAttributes.add(new Attribute(p)); }
-				wekaAttributes.add(new Attribute("Class"));
+				for(String p : parameterNames) { wekaAttributes.addElement(new Attribute(p)); }
+				wekaAttributes.addElement(new Attribute("Class"));
 				Instances newInstances = new Instances("New Data", wekaAttributes, data.length);
 
 				// set the class instance that we want to predict
@@ -391,4 +370,39 @@ public class MetaClassifier extends Thread {
 
 		return results;
 	}
+
+	/**
+	 * Utility method to transform any numeric data into an array of Doubles.
+	 * @return the transformed data.
+	 */
+	public static Double[] dataToDouble(Number[] data) {
+		Double[] result = new Double[data.length];
+		if(data instanceof Integer[]) {
+			for(int i = 0; i < data.length; i++) {
+				result[i] = new Double(data[i].intValue());
+			}
+		} else if(data instanceof Long[]) {
+			for(int i = 0; i < data.length; i++) {
+				result[i] = new Double(data[i].longValue());
+			}
+		} else if(data instanceof Short[]) {
+			for(int i = 0; i < data.length; i++) {
+				result[i] = new Double(data[i].shortValue());
+			}
+		} else if(data instanceof Float[]) {
+			for(int i = 0; i < data.length; i++) {
+				result[i] = new Double(data[i].floatValue());
+			}
+		} else if(data instanceof Byte[]) {
+			for(int i = 0; i < data.length; i++) {
+				result[i] = new Double(data[i].byteValue());
+			}
+		} else {
+			for(int i = 0; i < data.length; i++) {
+				result[i] = new Double(data[i].doubleValue());
+			}
+		}
+		return result;
+	}
+
 }

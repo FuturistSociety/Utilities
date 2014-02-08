@@ -1,6 +1,7 @@
 /**
  * @author Steven L. Moxley
- * @version 1.0
+ * @version 0.1
+ * To do for Beta release: implement fastICA()
  */
 package org.futurist.util.math;
 
@@ -93,6 +94,7 @@ public class DataAnalyzer {
 	
 	/**
 	 * Returns the entropy of the available values.  H(y) = -SUM{P(y=a)log[P(y=a)]}
+	 * @see formula 20 on pg. 8 of "Independent Component Analysis: Algorithms and Applications" by Aapo Hyva��rinen and Erkki Oja, Helsinki University of Technology, 2000.
 	 * @return The entropy.
 	 */
 	public double getEntropy() {
@@ -106,6 +108,7 @@ public class DataAnalyzer {
 	
 	/**
 	 * Returns the negentropy of the available values.  The formula used to calculate negentropy in this method is: J(y) ~ 1/12*E{y^3}^2 + 1/48*kurt(y)^2.  An alternative formula is: J(y) ~ SUM(k[E{G(y)} - E{G(v)}]) where k takes on the value of positive constants; G(u) = 1/a*log(cosh[au]) where 1 <= a <= 2 or G(u) = -EXP(-u^2/2).
+	 * @see formula 23 on pg. 8 and formulae 24 & 26 on pg. 9 of Independent Component Analysis: Algorithms and Applications" by Aapo Hyva��rinen and Erkki Oja, Helsinki University of Technology, 2000.
 	 * @return The sum of the squares or Double.NaN if no values have been added.
 	 */
 	public double getNegentropy() {
@@ -113,5 +116,15 @@ public class DataAnalyzer {
 		double secondTerm = Math.pow(description.getKurtosis(), 2);
 		return (firstTerm / 12) + (secondTerm / 48);
 	}
+	
+	/**
+	 * Fast Independent Component Analysis.
+	 * @see section 6, pp. 13-16 of "Independent Component Analysis: Algorithms and Applications".
+	 */
+	/*
+	public double[][] fastICA() {
+		
+	}
+	*/
 	
 }

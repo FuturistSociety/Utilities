@@ -1,6 +1,7 @@
 /**
  * @author Steven L. Moxley
- * @version 1.0
+ * @version 0.1
+ * To do for Beta release: implement whitenData()
  */
 package org.futurist.util.math;
 
@@ -13,12 +14,12 @@ public class DataPreparer {
 	private double[] data;
 	
 	/**
-	 * Default constructor to load data for preparation.
+	 * Default constructor to load data for preparation and remove outliers.
 	 * @param data the data to prepare.
 	 */
 	public DataPreparer(double input[]) {
 		data = input;
-		data = removeOutliers(data);
+		//data = removeOutliers(data);
 		//data = centerData(data);
 	}
 	
@@ -82,6 +83,7 @@ public class DataPreparer {
 	 * Whiten the data using a linear transformation that allows fewer parameters to be estimated.
 	 * @param input the original data.
 	 * @return the whitened data.
+	 * @see formula 35 on pg. 12 of "Independent Component Analysis: Algorithms and Applications".
 	 */
 	/*
 	public double[] whitenData(double input[]) {
@@ -174,7 +176,7 @@ public class DataPreparer {
 	 * @param input the original data.
 	 * @param targetCureve the target/ideal/correct values for the region of the curve in question
 	 * @param k a constant that determines the type of weighting.
-	 * @return the square root data.
+	 * @return the weighted data.
 	 * @see http://graphpad.com/guides/prism/6/curve-fitting/reg_how_weigting_works.htm
 	 */
 	public static double[] weightedTransform(double input[], double targetCurve[], double k) {
